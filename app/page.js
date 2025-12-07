@@ -142,7 +142,7 @@ export default function ArkBundleHubV4Phase2() {
   }, [addDebugLog]);
 
   // CRITICAL: Define getValidationScore BEFORE functions that use it
-  const getValidationScore = useCallback((product) => {
+  const getValidationScore = (product) => {
     let score = 0;
     const reasons = [];
     
@@ -180,7 +180,7 @@ export default function ArkBundleHubV4Phase2() {
     else if (score >= 40) { rating = 'Fair'; color = 'yellow'; }
     
     return { score, rating, color, reasons };
-  }, []);
+  };
 
   const categories = [
     { id: 'trending', name: '🔥 Trending', searches: ['TikTok viral products right now', 'Amazon movers shakers today', 'trending products this month'] },
@@ -228,7 +228,7 @@ export default function ArkBundleHubV4Phase2() {
   }, [calc]);
 
   // V4.0 NEW: Trend Prediction AI
-  const predictTrend = useCallback((product) => {
+  const predictTrend = (product) => {
     const bsr = product.bsr?.rank || 50000;
     const reviews = product.reviews?.count || 0;
     const viral = product.viral?.score || 0;
@@ -257,10 +257,10 @@ export default function ArkBundleHubV4Phase2() {
     }
     
     return { prediction, confidence, bestTimeToLaunch, window };
-  }, []);
+  };
 
   // V4.0 NEW: Market Saturation Analyzer
-  const analyzeSaturation = useCallback((product) => {
+  const analyzeSaturation = (product) => {
     const sellers = product.competition?.sellers || 50;
     const bsr = product.bsr?.rank || 50000;
     
@@ -287,10 +287,10 @@ export default function ArkBundleHubV4Phase2() {
     }
     
     return { saturation, level, recommendation };
-  }, []);
+  };
 
   // V4.0 NEW: Launch Success Predictor
-  const predictLaunchSuccess = useCallback((product) => {
+  const predictLaunchSuccess = (product) => {
     const validation = getValidationScore(product);
     const trend = predictTrend(product);
     const saturation = analyzeSaturation(product);
@@ -328,7 +328,7 @@ export default function ArkBundleHubV4Phase2() {
       timeToProfit,
       recommendedPPC: Math.round(requiredInventory * (product.price?.cost || 10) * 0.3)
     };
-  }, [getValidationScore, predictTrend, analyzeSaturation]);
+  };
 
   // V4.0 NEW: Australian Retail Stock Checker (simulated - would use real APIs in production)
   const checkAustralianRetail = useCallback(async (productName) => {
