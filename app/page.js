@@ -171,6 +171,47 @@ export default function ArkBundleHubV4() {
     };
   }, [calc]);
 
+  // Product Validation Score - MUST BE DEFINED FIRST
+  const getValidationScore = (product) => {
+    let score = 0;
+    const reasons = [];
+    
+    // Demand check (BSR)
+    if (product.bsr?.rank) {
+      if (product.bsr.rank < 5000) { score += 25; reasons.push('Excellent demand (BSR < 5000)'); }
+      else if (product.bsr.rank < 15000) { score += 20; reasons.push('Good demand (BSR < 15000)'); }
+      else if (product.bsr.rank < 50000) { score += 15; reasons.push('Moderate demand (BSR < 50000)'); }
+      else { score += 5; reasons.push('Lower demand (BSR > 50000)'); }
+    }
+    
+    // Competition check
+    if (product.competition?.level === 'Low') { score += 25; reasons.push('Low competition'); }
+    else if (product.competition?.level === 'Medium') { score += 15; reasons.push('Medium competition'); }
+    else { score += 5; reasons.push('High competition'); }
+    
+    // Profitability check
+    if (product.price?.margin > 60) { score += 25; reasons.push('High margins (>60%)'); }
+    else if (product.price?.margin > 40) { score += 20; reasons.push('Good margins (>40%)'); }
+    else if (product.price?.margin > 25) { score += 10; reasons.push('Acceptable margins (>25%)'); }
+    
+    // Trend check
+    if (product.bsr?.trend === 'Rising') { score += 15; reasons.push('Rising trend'); }
+    else if (product.bsr?.trend === 'Stable') { score += 10; reasons.push('Stable trend'); }
+    
+    // Reviews check
+    if (product.reviews?.rating >= 4.5) { score += 10; reasons.push('Excellent reviews (4.5+)'); }
+    else if (product.reviews?.rating >= 4.0) { score += 5; reasons.push('Good reviews (4.0+)'); }
+    
+    // Rating
+    let rating = 'Poor';
+    let color = 'red';
+    if (score >= 80) { rating = 'Excellent'; color = 'green'; }
+    else if (score >= 60) { rating = 'Good'; color = 'blue'; }
+    else if (score >= 40) { rating = 'Fair'; color = 'yellow'; }
+    
+    return { score, rating, color, reasons };
+  };
+
   // V4.0 NEW: Trend Prediction AI
   const predictTrend = useCallback((product) => {
     const bsr = product.bsr?.rank || 50000;
@@ -304,47 +345,6 @@ export default function ArkBundleHubV4() {
     addDebugLog('success', 'AU retail check complete', stock);
     return stock;
   }, [addDebugLog]);
-
-  // Product Validation Score
-  const getValidationScore = (product) => {
-    let score = 0;
-    const reasons = [];
-    
-    // Demand check (BSR)
-    if (product.bsr?.rank) {
-      if (product.bsr.rank < 5000) { score += 25; reasons.push('Excellent demand (BSR < 5000)'); }
-      else if (product.bsr.rank < 15000) { score += 20; reasons.push('Good demand (BSR < 15000)'); }
-      else if (product.bsr.rank < 50000) { score += 15; reasons.push('Moderate demand (BSR < 50000)'); }
-      else { score += 5; reasons.push('Lower demand (BSR > 50000)'); }
-    }
-    
-    // Competition check
-    if (product.competition?.level === 'Low') { score += 25; reasons.push('Low competition'); }
-    else if (product.competition?.level === 'Medium') { score += 15; reasons.push('Medium competition'); }
-    else { score += 5; reasons.push('High competition'); }
-    
-    // Profitability check
-    if (product.price?.margin > 60) { score += 25; reasons.push('High margins (>60%)'); }
-    else if (product.price?.margin > 40) { score += 20; reasons.push('Good margins (>40%)'); }
-    else if (product.price?.margin > 25) { score += 10; reasons.push('Acceptable margins (>25%)'); }
-    
-    // Trend check
-    if (product.bsr?.trend === 'Rising') { score += 15; reasons.push('Rising trend'); }
-    else if (product.bsr?.trend === 'Stable') { score += 10; reasons.push('Stable trend'); }
-    
-    // Reviews check
-    if (product.reviews?.rating >= 4.5) { score += 10; reasons.push('Excellent reviews (4.5+)'); }
-    else if (product.reviews?.rating >= 4.0) { score += 5; reasons.push('Good reviews (4.0+)'); }
-    
-    // Rating
-    let rating = 'Poor';
-    let color = 'red';
-    if (score >= 80) { rating = 'Excellent'; color = 'green'; }
-    else if (score >= 60) { rating = 'Good'; color = 'blue'; }
-    else if (score >= 40) { rating = 'Fair'; color = 'yellow'; }
-    
-    return { score, rating, color, reasons };
-  };
 
   // Enhanced AI Search Function with V4.0 features
   const scan = useCallback(async (searchQuery = '', categoryData = null) => {
