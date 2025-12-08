@@ -368,7 +368,7 @@ export default function ArkBundleHubV4() {
     const currentYear = now.getFullYear();
 
     try {
-      addDebugLog('info', 'Calling AI API...', { model: 'claude-sonnet-4' });
+      addDebugLog('info', 'Calling AI API...', { model: 'groq-llama-3.1-70b' });
       
       const res = await fetch('/api/search', {
         method: 'POST',
@@ -379,7 +379,9 @@ export default function ArkBundleHubV4() {
 Use web_search to find 8 trending products from TikTok, Amazon Best Sellers, AU retail.
 
 Return ONLY JSON array (no markdown):
-[{"name":"Product","category":"${cat.name}","emoji":"📦","desc":"trending reason","asin":"B08XXX","price":{"cost":8,"sell":25,"margin":68,"roi":213},"bsr":{"rank":3500,"category":"Category","monthlySales":600},"reviews":{"count":850,"rating":4.4},"competition":{"sellers":42,"level":"Medium"},"viral":{"score":84,"platform":"TikTok","reason":"reason","views":"3M"},"trend":{"direction":"Rising","velocity":"Fast"},"suppliers":{"alibaba":7.5,"cj":8.2},"profitability":{"breakeven":35,"monthly":2100,"yearly":25200}}]`
+[{"name":"Product","category":"${cat.name}","emoji":"📦","desc":"trending reason","asin":"B08XXX","price":{"cost":8,"sell":25,"margin":68,"roi":213},"bsr":{"rank":3500,"category":"Category","monthlySales":600},"reviews":{"count":850,"rating":4.4},"competition":{"sellers":42,"level":"Medium"},"viral":{"score":84,"platform":"TikTok","reason":"reason","views":"3M"},"trend":{"direction":"Rising","velocity":"Fast"},"suppliers":{"alibaba":7.5,"cj":8.2},"profitability":{"breakeven":35,"monthly":2100,"yearly":25200}}]`,
+          category: cat.name,
+          searchQuery: searchQuery
         })
       });
 
@@ -392,12 +394,8 @@ Return ONLY JSON array (no markdown):
         throw new Error(typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
       }
       
-      let txt = '';
-      if (data.content) {
-        for (const block of data.content) {
-          if (block.type === 'text') txt += block.text;
-        }
-      }
+      // V5.0 returns data directly in data.data (not data.content)
+      let txt = data.data || '';
 
       addDebugLog('info', 'Extracted response text', { length: txt.length, preview: txt.substring(0, 150) });
 
@@ -662,7 +660,7 @@ Return ONLY JSON array (no markdown):
               <Icon name="brain" size={48} className="text-white" />
             </div>
             <h1 className="text-4xl font-black text-white mb-2">Ark Bundle Hub</h1>
-            <p className="text-purple-300 font-bold">V4.3 Lite - Bundle AI Edition</p>
+            <p className="text-purple-300 font-bold">V5.0 - Groq AI Edition (150x Cheaper!)</p>
             <p className="text-purple-400 text-sm mt-2">🇦🇺 AU Retail • AI Predictions • Advanced Analytics</p>
           </div>
           <div className="bg-white/10 backdrop-blur rounded-3xl p-8 border border-white/20">
@@ -685,7 +683,7 @@ Return ONLY JSON array (no markdown):
                 onClick={() => pw === ADMIN_PASSWORD ? setAuth(true) : notify('Invalid password', 'err')}
                 className="w-full py-4 bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 text-white font-bold rounded-xl text-lg"
               >
-                Access V4.3 Lite
+                Access V5.0 Groq
               </button>
             </div>
           </div>
@@ -788,7 +786,7 @@ Return ONLY JSON array (no markdown):
                 <Icon name="brain" size={28} /> ARK
               </div>
               <div>
-                <p className="font-bold text-lg">V4.3 Lite Edition</p>
+                <p className="font-bold text-lg">V5.0 Groq Edition</p>
                 <p className="text-sm text-purple-300">🇦🇺 AU Retail • AI Predictions • v4.0</p>
               </div>
             </div>
@@ -1750,4 +1748,3 @@ Return ONLY JSON array (no markdown):
     </div>
   );
 }
-      
