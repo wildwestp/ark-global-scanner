@@ -1,23 +1,18 @@
-// ARK V5.0 - Perplexity API Route
-// Features: Perplexity API with web search, Supabase caching, 3x cheaper than Anthropic
-
 import { NextResponse } from 'next/server';
 
-// Lazy load Supabase to avoid build issues
-let supabaseInstance = null;
+let supabase = null;
 
 function getSupabase() {
-  if (!supabaseInstance && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
+  if (!supabase && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
     const { createClient } = require('@supabase/supabase-js');
-    supabaseInstance = createClient(
+    supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_KEY
     );
   }
-  return supabaseInstance;
+  return supabase;
 }
 
-// Simple hash function for cache keys
 function hashQuery(query, category) {
   return `${category}_${query}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
 }
@@ -29,13 +24,10 @@ export async function POST(request) {
     const cacheKey = hashQuery(searchQuery || 'default', category || 'general');
     const db = getSupabase();
 
-    // ==========================================
-    // STEP 1: CHECK CACHE (FREE & INSTANT!)
-    // ==========================================
+    console.log('🔍 Search:', cacheKey);
+
     if (db) {
-      console.log('🔍 Checking cache for:', cacheKey);
-      
-      const { data: cachedResult, error: cacheError } = await db
+      const { data: cached, error: cacheError } = await db
         .from('product_cache')
         .select('*')
         .eq('cache_key', cacheKey)
@@ -44,31 +36,24 @@ export async function POST(request) {
         .limit(1)
         .single();
 
-      if (cachedResult && !cacheError) {
-        console.log('✅ Cache HIT! Returning cached data (FREE, instant)');
-        
-        // Update search count
+      if (cached && !cacheError) {
+        console.log('✅ Cache HIT');
         await db
           .from('product_cache')
-          .update({ search_count: cachedResult.search_count + 1 })
-          .eq('id', cachedResult.id);
+          .update({ search_count: cached.search_count + 1 })
+          .eq('id', cached.id);
 
         return NextResponse.json({
           success: true,
-          data: cachedResult.products_data,
+          data: cached.products_data,
           cached: true,
-          cacheAge: Math.floor((Date.now() - new Date(cachedResult.created_at).getTime()) / 1000 / 60),
           responseTime: Date.now() - startTime
         });
       }
     }
 
-    console.log('❌ Cache MISS. Calling Perplexity API with web search...');
+    console.log('❌ Cache MISS - Calling Perplexity...');
 
-    // ==========================================
-    // STEP 2: CALL PERPLEXITY API (WITH WEB SEARCH!)
-    // ==========================================
-    
     const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
@@ -76,11 +61,11 @@ export async function POST(request) {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.1-sonar-large-128k-online', // Has web search!
+        model: 'llama-3.1-sonar-large-128k-online',
         messages: [
           {
             role: 'system',
-            content: 'You are a product research AI for Amazon FBA sellers. Search the web for current trending products and return ONLY valid JSON arrays. No markdown, no explanations, just the JSON array.'
+            content: 'You are a product research AI. Return ONLY valid JSON arrays. No markdown, no explanations.'
           },
           {
             role: 'user',
@@ -90,39 +75,37 @@ export async function POST(request) {
         temperature: 0.7,
         max_tokens: 4000,
         top_p: 0.9,
-        search_domain_filter: ['amazon.com', 'tiktok.com', 'instagram.com'],
+        search_domain_filter: ['amazon.com', 'tiktok.com'],
         return_images: false,
         return_related_questions: false,
-        search_recency_filter: 'month', // Only recent results
+        search_recency_filter: 'month',
         stream: false
       })
     });
 
     if (!perplexityResponse.ok) {
       const errorData = await perplexityResponse.json().catch(() => ({}));
-      console.error('Perplexity API Error:', {
-        status: perplexityResponse.status,
-        statusText: perplexityResponse.statusText,
-        error: errorData
-      });
-      throw new Error(`Perplexity API error: ${perplexityResponse.status} - ${errorData.error?.message || perplexityResponse.statusText}`);
+      console.error('❌ Perplexity Error:', perplexityResponse.status, errorData);
+      
+      return NextResponse.json(
+        {
+          error: `Perplexity API error (${perplexityResponse.status}): ${errorData.error?.message || 'Check API key'}`,
+          type: 'api_error'
+        },
+        { status: 500 }
+      );
     }
 
     const perplexityData = await perplexityResponse.json();
     let responseText = perplexityData.choices[0]?.message?.content || '[]';
 
-    // Clean response (remove markdown if present)
     responseText = responseText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
       .trim();
 
-    console.log('✅ Perplexity API response received with web search results');
+    console.log('✅ Perplexity success');
 
-    // ==========================================
-    // STEP 3: SAVE TO CACHE
-    // ==========================================
-    
     if (db) {
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24);
@@ -138,44 +121,32 @@ export async function POST(request) {
           search_count: 1
         });
 
-      console.log('💾 Cached for 24 hours');
+      console.log('💾 Cached');
     }
 
     return NextResponse.json({
       success: true,
       data: responseText,
       cached: false,
-      apiCost: 0.001, // Approximate cost per search
+      apiCost: 0.001,
       responseTime: Date.now() - startTime,
       searchEnabled: true
     });
 
   } catch (error) {
-    console.error('❌ API Error:', error);
-
-    let errorMessage = 'Search failed. Please try again.';
-    let errorType = 'unknown';
-
-    if (error.message.includes('Perplexity')) {
-      errorMessage = 'AI service temporarily unavailable. Try again in a moment.';
-      errorType = 'api_error';
-    } else if (error.message.includes('rate limit')) {
-      errorMessage = 'Too many searches. Please wait 30 seconds.';
-      errorType = 'rate_limit';
-    }
+    console.error('❌ Error:', error);
 
     return NextResponse.json(
       {
-        error: errorMessage,
-        type: errorType,
-        details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        error: error.message || 'Search failed',
+        type: 'unknown',
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
       { status: 500 }
     );
   }
 }
 
-// Save user bundle
 export async function PUT(request) {
   try {
     const { userId, bundleName, products } = await request.json();
@@ -206,7 +177,6 @@ export async function PUT(request) {
   }
 }
 
-// Get user data
 export async function GET(request) {
   try {
     const userId = request.nextUrl.searchParams.get('userId');
