@@ -1,5 +1,5 @@
-// ARK V5.0 - Optimized Search API Route
-// Features: Groq API (150x cheaper), Supabase caching, smart persistence
+// ARK V5.0 - Perplexity API Route
+// Features: Perplexity API with web search, Supabase caching, 3x cheaper than Anthropic
 
 import { NextResponse } from 'next/server';
 
@@ -63,24 +63,24 @@ export async function POST(request) {
       }
     }
 
-    console.log('❌ Cache MISS. Calling Groq API...');
+    console.log('❌ Cache MISS. Calling Perplexity API with web search...');
 
     // ==========================================
-    // STEP 2: CALL GROQ API (CHEAP & FAST!)
+    // STEP 2: CALL PERPLEXITY API (WITH WEB SEARCH!)
     // ==========================================
     
-    const groqResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    const perplexityResponse = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Authorization': `Bearer ${process.env.PERPLEXITY_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'llama-3.1-70b-versatile',
+        model: 'llama-3.1-sonar-large-128k-online', // Has web search!
         messages: [
           {
             role: 'system',
-            content: 'You are a product research AI for Amazon FBA. Return ONLY valid JSON arrays of products. No markdown, no explanations.'
+            content: 'You are a product research AI for Amazon FBA sellers. Search the web for current trending products and return ONLY valid JSON arrays. No markdown, no explanations, just the JSON array.'
           },
           {
             role: 'user',
@@ -88,26 +88,36 @@ export async function POST(request) {
           }
         ],
         temperature: 0.7,
-        max_tokens: 2000,
-        top_p: 1,
+        max_tokens: 4000,
+        top_p: 0.9,
+        search_domain_filter: ['amazon.com', 'tiktok.com', 'instagram.com'],
+        return_images: false,
+        return_related_questions: false,
+        search_recency_filter: 'month', // Only recent results
         stream: false
       })
     });
 
-    if (!groqResponse.ok) {
-      throw new Error(`Groq API error: ${groqResponse.status}`);
+    if (!perplexityResponse.ok) {
+      const errorData = await perplexityResponse.json().catch(() => ({}));
+      console.error('Perplexity API Error:', {
+        status: perplexityResponse.status,
+        statusText: perplexityResponse.statusText,
+        error: errorData
+      });
+      throw new Error(`Perplexity API error: ${perplexityResponse.status} - ${errorData.error?.message || perplexityResponse.statusText}`);
     }
 
-    const groqData = await groqResponse.json();
-    let responseText = groqData.choices[0]?.message?.content || '[]';
+    const perplexityData = await perplexityResponse.json();
+    let responseText = perplexityData.choices[0]?.message?.content || '[]';
 
-    // Clean response
+    // Clean response (remove markdown if present)
     responseText = responseText
       .replace(/```json\n?/g, '')
       .replace(/```\n?/g, '')
       .trim();
 
-    console.log('✅ Groq API response received');
+    console.log('✅ Perplexity API response received with web search results');
 
     // ==========================================
     // STEP 3: SAVE TO CACHE
@@ -135,8 +145,9 @@ export async function POST(request) {
       success: true,
       data: responseText,
       cached: false,
-      apiCost: 0.0002,
-      responseTime: Date.now() - startTime
+      apiCost: 0.001, // Approximate cost per search
+      responseTime: Date.now() - startTime,
+      searchEnabled: true
     });
 
   } catch (error) {
@@ -145,7 +156,7 @@ export async function POST(request) {
     let errorMessage = 'Search failed. Please try again.';
     let errorType = 'unknown';
 
-    if (error.message.includes('Groq')) {
+    if (error.message.includes('Perplexity')) {
       errorMessage = 'AI service temporarily unavailable. Try again in a moment.';
       errorType = 'api_error';
     } else if (error.message.includes('rate limit')) {
