@@ -408,8 +408,6 @@ Return ONLY a JSON array with 8 REAL products (no markdown, no explanations):
       if (data.searchEnabled) {
         addDebugLog('success', 'Web search was enabled', { cached: data.cached });
       }
-      // V5.0 returns data directly in data.data (not data.content)
-      let txt = data.data || '';
 
       addDebugLog('info', 'Extracted response text', { length: txt.length, preview: txt.substring(0, 150) });
 
