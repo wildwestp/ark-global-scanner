@@ -1,567 +1,408 @@
-// ARK V5.3 PRODUCTION - Professional Grade with Real AliExpress Integration
-import { NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-let supabase = null;
+// ============================================================================
+// SETUP
+// ============================================================================
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
-function getSupabase() {
-  if (!supabase && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY) {
-    const { createClient } = require('@supabase/supabase-js');
-    supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_KEY
-    );
-  }
-  return supabase;
-}
+const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
+const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions';
 
-function hashQuery(query, category) {
-  const normalized = `${category}_${query || 'default'}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
-  return normalized;
-}
-
-// Enhanced logging system
-function log(level, message, data = {}) {
-  const timestamp = new Date().toISOString();
-  const emoji = {
-    info: '🔍',
-    success: '✅',
-    error: '❌',
-    warning: '⚠️',
-    cache: '💾',
-    api: '📡'
-  }[level] || '📋';
-  
-  console.log(`${emoji} [${timestamp}] ${message}`, data ? JSON.stringify(data) : '');
-}
-
+// ============================================================================
+// MAIN HANDLER - Routes to different endpoints based on request
+// ============================================================================
 export async function POST(request) {
   const startTime = Date.now();
   
   try {
-    const { prompt, category, searchQuery } = await request.json();
-    const cleanCategory = category?.replace(/[🔥🍳🏠🧹💄📱🐕💪👕👶🌱🎮🎧📷🏋️🎨📚🚗🎒]/g, '').trim() || 'General';
-    const cacheKey = hashQuery(searchQuery, cleanCategory);
-    const db = getSupabase();
+    const body = await request.json();
+    const { action } = body;
 
-    log('info', 'Search initiated', { 
-      category: cleanCategory, 
-      query: searchQuery || 'default',
-      cacheKey 
+    // Route to appropriate handler
+    switch (action) {
+      case 'search':
+        return await handleSearch(body, startTime);
+      case 'history':
+        return await handleHistory(body);
+      case 'save':
+        return await handleSave(body);
+      case 'competitor':
+        return await handleCompetitor(body);
+      case 'alert':
+        return await handleAlert(body);
+      case 'bundle-ai':
+        return await handleBundleAI(body);
+      default:
+        return Response.json({ error: 'Invalid action' }, { status: 400 });
+    }
+  } catch (error) {
+    console.error('💥 API Error:', error);
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// For GET requests (retrieve saved products, etc.)
+export async function GET(request) {
+  try {
+    const url = new URL(request.url);
+    const action = url.searchParams.get('action');
+
+    if (action === 'saved') {
+      const { data } = await supabase
+        .from('user_saved')
+        .select('*')
+        .order('saved_at', { ascending: false });
+      return Response.json({ products: data || [] });
+    }
+
+    if (action === 'competitors') {
+      const { data } = await supabase
+        .from('competitors')
+        .select('*')
+        .order('added_at', { ascending: false });
+      return Response.json({ competitors: data || [] });
+    }
+
+    return Response.json({ error: 'Invalid action' }, { status: 400 });
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// ============================================================================
+// SEARCH HANDLER
+// ============================================================================
+async function handleSearch(body, startTime) {
+  const { category, keyword, filters } = body;
+
+  console.log('🔍 [Search] Request:', { category, keyword });
+
+  // Generate cache key
+  const cacheKey = `${keyword || category}_${JSON.stringify(filters || {})}`.toLowerCase().replace(/\s+/g, '_');
+
+  // Check cache
+  const { data: cached } = await supabase
+    .from('product_cache')
+    .select('*')
+    .eq('cache_key', cacheKey)
+    .gt('expires_at', new Date().toISOString())
+    .single();
+
+  if (cached) {
+    console.log('⚡ Cache hit!');
+    return Response.json({
+      products: cached.products,
+      cached: true,
+      processingTime: Date.now() - startTime
     });
+  }
 
-    // Cache check
-    if (db) {
-      try {
-        const { data: cached } = await db
-          .from('product_cache')
-          .select('*')
-          .eq('cache_key', cacheKey)
-          .gt('expires_at', new Date().toISOString())
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+  console.log('🌐 Fetching from Perplexity...');
 
-        if (cached) {
-          const cacheTime = Date.now() - startTime;
-          log('cache', 'Cache HIT', { time: `${cacheTime}ms`, searches: cached.search_count + 1 });
-          
-          await db
-            .from('product_cache')
-            .update({ search_count: cached.search_count + 1 })
-            .eq('id', cached.id);
+  // Fetch from Perplexity
+  const products = await fetchFromPerplexity(keyword || category);
 
-          return NextResponse.json({
-            success: true,
-            data: cached.products_data,
-            cached: true,
-            responseTime: cacheTime,
-            debug: {
-              source: 'cache',
-              cacheKey,
-              hits: cached.search_count + 1
-            }
-          });
-        }
-      } catch (cacheError) {
-        log('warning', 'Cache check failed', { error: cacheError.message });
-      }
-    }
+  // Validate products
+  const validatedProducts = products.map(p => ({
+    title: p.title || 'Product',
+    asin: p.asin || 'B0XXXXXXXX',
+    price: parseFloat(p.price) || 19.99,
+    supplier_price: parseFloat(p.supplier_price) || 9.99,
+    bsr: p.bsr || '50000',
+    rating: p.rating || '4.5',
+    reviews: p.reviews || '500',
+    image_url: p.image_url || 'https://m.media-amazon.com/images/I/placeholder.jpg',
+    amazon_url: p.amazon_url || `https://www.amazon.com/dp/${p.asin}`,
+    supplier_url: p.supplier_url || `https://www.aliexpress.com/w/wholesale-${(p.title || 'product').replace(/[^a-zA-Z0-9\s]/g, '').replace(/\s+/g, '-')}.html?sortType=total_tranpro_desc`
+  })).filter(p => p.title && p.asin);
 
-    log('info', 'Cache MISS - calling AI', {});
+  // Store in cache
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + 24);
 
-    const cleanKey = process.env.PERPLEXITY_API_KEY?.trim();
-    if (!cleanKey) {
-      log('error', 'API key missing', {});
-      return NextResponse.json({ error: 'API key not configured' }, { status: 500 });
-    }
+  await supabase.from('product_cache').insert({
+    cache_key: cacheKey,
+    products: validatedProducts,
+    category: category || null,
+    keyword: keyword || null,
+    expires_at: expiresAt.toISOString()
+  });
 
-    // Enhanced prompt for better results
-    const enhancedPrompt = buildEnhancedPrompt(cleanCategory, searchQuery);
-    
-    log('api', 'Calling Perplexity API', { 
+  // Track history
+  const historyEntries = validatedProducts.map(p => ({
+    asin: p.asin,
+    price: parseFloat(p.price),
+    bsr: parseInt(p.bsr),
+    rating: parseFloat(p.rating),
+    reviews: parseInt(p.reviews),
+    timestamp: new Date().toISOString()
+  }));
+
+  await supabase.from('product_history').insert(historyEntries);
+
+  console.log('✅ Search complete');
+
+  return Response.json({
+    products: validatedProducts,
+    cached: false,
+    processingTime: Date.now() - startTime
+  });
+}
+
+// ============================================================================
+// PERPLEXITY API
+// ============================================================================
+async function fetchFromPerplexity(query) {
+  const prompt = `Find 8 REAL Amazon products for: "${query}"
+
+Return ONLY a JSON array with this exact format (no markdown, no explanation):
+[
+  {
+    "title": "Product name",
+    "asin": "B0XXXXXXXX",
+    "price": "29.99",
+    "bsr": "15234",
+    "rating": "4.5",
+    "reviews": "1234",
+    "image_url": "https://m.media-amazon.com/...",
+    "amazon_url": "https://www.amazon.com/dp/ASIN",
+    "supplier_url": "https://www.aliexpress.com/w/wholesale-productname.html",
+    "supplier_price": "12.50"
+  }
+]
+
+Requirements:
+- Real Amazon products matching "${query}"
+- Valid ASINs (10 chars, starts with B0)
+- Realistic prices ($5-200)
+- BSR < 500,000
+- Rating 3.0-5.0
+- AliExpress supplier URLs
+- Return exactly 8 products`;
+
+  const response = await fetch(PERPLEXITY_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
       model: 'sonar',
-      promptLength: enhancedPrompt.length 
-    });
+      messages: [
+        { role: 'system', content: 'You are a professional Amazon FBA researcher. Always return valid JSON arrays.' },
+        { role: 'user', content: prompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 4000
+    })
+  });
 
-    const apiStart = Date.now();
-    const response = await fetch('https://api.perplexity.ai/chat/completions', {
+  if (!response.ok) throw new Error('Perplexity API error');
+
+  const data = await response.json();
+  let content = data.choices[0].message.content.trim();
+
+  // Clean markdown
+  content = content.replace(/```json\s*/g, '').replace(/```\s*$/g, '');
+  const jsonMatch = content.match(/\[[\s\S]*\]/);
+  if (jsonMatch) content = jsonMatch[0];
+
+  try {
+    return JSON.parse(content);
+  } catch {
+    return generateFallback(8);
+  }
+}
+
+// ============================================================================
+// HISTORY HANDLER
+// ============================================================================
+async function handleHistory(body) {
+  const { asins } = body;
+  
+  const { data: priceData } = await supabase
+    .from('product_history')
+    .select('asin, price, timestamp')
+    .in('asin', asins)
+    .order('timestamp', { ascending: true });
+
+  const { data: bsrData } = await supabase
+    .from('product_history')
+    .select('asin, bsr, timestamp')
+    .in('asin', asins)
+    .order('timestamp', { ascending: true });
+
+  const priceHistory = {};
+  const bsrHistory = {};
+
+  priceData?.forEach(r => {
+    if (!priceHistory[r.asin]) priceHistory[r.asin] = [];
+    priceHistory[r.asin].push({ price: r.price, timestamp: r.timestamp });
+  });
+
+  bsrData?.forEach(r => {
+    if (!bsrHistory[r.asin]) bsrHistory[r.asin] = [];
+    bsrHistory[r.asin].push({ bsr: r.bsr, timestamp: r.timestamp });
+  });
+
+  return Response.json({ priceHistory, bsrHistory });
+}
+
+// ============================================================================
+// SAVE HANDLER
+// ============================================================================
+async function handleSave(body) {
+  const product = body.product;
+
+  const { data } = await supabase
+    .from('user_saved')
+    .insert({
+      asin: product.asin,
+      title: product.title,
+      price: parseFloat(product.price),
+      supplier_price: parseFloat(product.supplier_price),
+      bsr: parseInt(product.bsr),
+      rating: parseFloat(product.rating),
+      reviews: parseInt(product.reviews),
+      image_url: product.image_url,
+      amazon_url: product.amazon_url,
+      supplier_url: product.supplier_url,
+      saved_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  return Response.json({ success: true, product: data });
+}
+
+// ============================================================================
+// COMPETITOR HANDLER
+// ============================================================================
+async function handleCompetitor(body) {
+  const { asin, operation } = body;
+
+  if (operation === 'add') {
+    const { data } = await supabase
+      .from('competitors')
+      .insert({
+        asin,
+        added_at: new Date().toISOString(),
+        last_checked: new Date().toISOString()
+      })
+      .select()
+      .single();
+
+    return Response.json({ success: true, competitor: data });
+  }
+
+  if (operation === 'remove') {
+    await supabase.from('competitors').delete().eq('asin', asin);
+    return Response.json({ success: true });
+  }
+
+  return Response.json({ error: 'Invalid operation' }, { status: 400 });
+}
+
+// ============================================================================
+// ALERT HANDLER
+// ============================================================================
+async function handleAlert(body) {
+  const { asin, alertType, threshold, email } = body;
+
+  const { data } = await supabase
+    .from('price_alerts')
+    .insert({
+      asin,
+      alert_type: alertType,
+      threshold,
+      email,
+      active: true,
+      created_at: new Date().toISOString()
+    })
+    .select()
+    .single();
+
+  return Response.json({ 
+    success: true, 
+    alert: data,
+    message: `Alert set for ${alertType}!`
+  });
+}
+
+// ============================================================================
+// BUNDLE AI HANDLER
+// ============================================================================
+async function handleBundleAI(body) {
+  const { products, category } = body;
+
+  const productContext = products.slice(0, 5).map((p, i) => 
+    `${i + 1}. ${p.title} - $${p.price}`
+  ).join('\n');
+
+  const prompt = `Create a bundle strategy for these products:
+
+${productContext}
+
+Category: ${category}
+
+Provide:
+1. Bundle Name
+2. Products to include
+3. Pricing strategy
+4. Target audience
+5. Key selling points
+6. Marketing tips
+
+Make it actionable and specific.`;
+
+  try {
+    const response = await fetch(PERPLEXITY_API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${cleanKey}`,
+        'Authorization': `Bearer ${PERPLEXITY_API_KEY}`,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: 'sonar',
         messages: [
-          {
-            role: 'system',
-            content: 'You are a professional Amazon FBA product research expert. ALWAYS return valid JSON arrays with 8 products. Include real Amazon ASINs and working AliExpress product links. Never return empty arrays or placeholder data.'
-          },
-          {
-            role: 'user',
-            content: enhancedPrompt
-          }
+          { role: 'system', content: 'You are an Amazon FBA bundle expert.' },
+          { role: 'user', content: prompt }
         ],
-        temperature: 0.3,
-        max_tokens: 4000,
-        top_p: 0.9
+        temperature: 0.7,
+        max_tokens: 2000
       })
     });
 
-    const apiTime = Date.now() - apiStart;
-    log('api', 'API response received', { 
-      status: response.status,
-      time: `${apiTime}ms` 
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      log('error', 'API request failed', { 
-        status: response.status,
-        error: errorText.substring(0, 200)
-      });
-      
-      // Return high-quality fallback
-      const fallbackData = generateProfessionalFallback(cleanCategory, searchQuery);
-      return NextResponse.json({
-        success: true,
-        data: fallbackData,
-        cached: false,
-        fallback: true,
-        responseTime: Date.now() - startTime,
-        debug: {
-          source: 'fallback',
-          reason: 'api_error',
-          apiError: response.status
-        }
-      });
-    }
-
     const data = await response.json();
-    let content = data.choices[0]?.message?.content || '[]';
-    
-    log('success', 'AI response parsed', { 
-      length: content.length 
-    });
-
-    // Clean and validate response
-    content = content
-      .replace(/```json\n?/g, '')
-      .replace(/```\n?/g, '')
-      .trim();
-
-    // Validate JSON structure
-    let products;
-    try {
-      products = JSON.parse(content);
-      
-      if (!Array.isArray(products)) {
-        throw new Error('Response is not an array');
-      }
-      
-      if (products.length === 0) {
-        throw new Error('Empty product array');
-      }
-
-      // Validate and enhance product data
-      products = products.map((p, i) => validateAndEnhanceProduct(p, i, cleanCategory, searchQuery));
-      
-      log('success', 'Products validated', { 
-        count: products.length,
-        withAliExpress: products.filter(p => p.aliexpress).length
-      });
-      
-      content = JSON.stringify(products);
-
-    } catch (parseError) {
-      log('error', 'JSON parse/validate failed', { 
-        error: parseError.message,
-        contentPreview: content.substring(0, 200)
-      });
-      
-      const fallbackData = generateProfessionalFallback(cleanCategory, searchQuery);
-      return NextResponse.json({
-        success: true,
-        data: fallbackData,
-        cached: false,
-        fallback: true,
-        responseTime: Date.now() - startTime,
-        debug: {
-          source: 'fallback',
-          reason: 'parse_error',
-          error: parseError.message
-        }
-      });
-    }
-
-    // Cache the validated results
-    if (db) {
-      try {
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 24);
-
-        await db.from('product_cache').insert({
-          cache_key: cacheKey,
-          search_query: searchQuery || 'default',
-          category: cleanCategory,
-          products_data: content,
-          expires_at: expiresAt.toISOString(),
-          search_count: 1
-        });
-        
-        log('cache', 'Results cached', { expiresIn: '24h' });
-      } catch (cacheError) {
-        log('warning', 'Cache insert failed', { error: cacheError.message });
-      }
-    }
-
-    const totalTime = Date.now() - startTime;
-    log('success', 'Search completed', { 
-      totalTime: `${totalTime}ms`,
-      apiTime: `${apiTime}ms`,
-      products: products.length
-    });
-
-    return NextResponse.json({
-      success: true,
-      data: content,
-      cached: false,
-      responseTime: totalTime,
-      searchEnabled: true,
-      debug: {
-        source: 'api',
-        apiTime,
-        totalTime,
-        productCount: products.length,
-        cacheKey
-      }
-    });
-
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    log('error', 'Unexpected exception', { 
-      error: error.message,
-      stack: error.stack?.substring(0, 200),
-      time: `${totalTime}ms`
-    });
-    
-    return NextResponse.json(
-      { 
-        error: error.message, 
-        type: 'exception',
-        debug: {
-          source: 'exception',
-          time: totalTime
-        }
-      },
-      { status: 500 }
-    );
-  }
-}
-
-function buildEnhancedPrompt(category, keyword) {
-  const searchTerm = keyword || category;
-  
-  return `Search Amazon and AliExpress for 8 profitable "${searchTerm}" products.
-
-REQUIREMENTS:
-1. Find products with REAL Amazon ASINs (format: B0XXXXXXXX)
-2. Find WORKING AliExpress product links (format: https://www.aliexpress.com/item/XXXXX.html)
-3. Calculate real profit margins (Amazon price - AliExpress cost)
-4. Focus on products with 40%+ margins and good BSR (<50,000)
-
-Return JSON array with this EXACT structure:
-[{
-  "name": "Exact product name",
-  "category": "${category}",
-  "emoji": "📦",
-  "desc": "Why this product is profitable (30 words max)",
-  "asin": "B0XXXXXXX",
-  "aliexpress": "https://www.aliexpress.com/item/1234567890.html",
-  "price": {
-    "cost": 8.50,
-    "sell": 24.99,
-    "margin": 66,
-    "roi": 194
-  },
-  "bsr": {
-    "rank": 8500,
-    "category": "${category}",
-    "monthlySales": 400
-  },
-  "reviews": {
-    "count": 650,
-    "rating": 4.3
-  },
-  "competition": {
-    "sellers": 38,
-    "level": "Medium"
-  },
-  "viral": {
-    "score": 72,
-    "platform": "TikTok",
-    "reason": "Viral trend explanation",
-    "views": "2.5M"
-  },
-  "trend": {
-    "direction": "Rising",
-    "velocity": "Medium"
-  },
-  "suppliers": {
-    "aliexpress": 8.50,
-    "alibaba": 7.20
-  },
-  "profitability": {
-    "breakeven": 30,
-    "monthly": 1800,
-    "yearly": 21600
-  }
-}]
-
-CRITICAL:
-- ALL AliExpress links must be real, working product URLs
-- ASINs must be valid Amazon format
-- Return EXACTLY 8 products
-- Focus on "${searchTerm}" specifically`;
-}
-
-function validateAndEnhanceProduct(product, index, category, keyword) {
-  const validated = {
-    name: product.name || `${keyword || category} Product ${index + 1}`,
-    category: category,
-    emoji: product.emoji || '📦',
-    desc: product.desc || 'High-quality product with good profit potential',
-    asin: validateASIN(product.asin) || generateASIN(),
-    aliexpress: validateAliExpressURL(product.aliexpress) || generateAliExpressURL(product.name || keyword || category),
-    price: {
-      cost: parseFloat(product.price?.cost) || 8 + index,
-      sell: parseFloat(product.price?.sell) || 25 + (index * 2),
-      margin: parseInt(product.price?.margin) || 68,
-      roi: parseInt(product.price?.roi) || 200
-    },
-    bsr: {
-      rank: parseInt(product.bsr?.rank) || 5000 + (index * 1000),
-      category: category,
-      monthlySales: parseInt(product.bsr?.monthlySales) || 500 - (index * 30)
-    },
-    reviews: {
-      count: parseInt(product.reviews?.count) || 600 + (index * 50),
-      rating: parseFloat(product.reviews?.rating) || 4.2 + (index * 0.05)
-    },
-    competition: {
-      sellers: parseInt(product.competition?.sellers) || 40 + (index * 3),
-      level: product.competition?.level || (index < 3 ? 'Low' : index < 6 ? 'Medium' : 'High')
-    },
-    viral: product.viral || {
-      score: 70 + (index * 2),
-      platform: 'TikTok',
-      reason: `Popular ${category} product`,
-      views: `${2 + index * 0.3}M`
-    },
-    trend: product.trend || {
-      direction: index < 5 ? 'Rising' : 'Stable',
-      velocity: index < 3 ? 'Fast' : 'Medium'
-    },
-    suppliers: {
-      aliexpress: parseFloat(product.suppliers?.aliexpress) || parseFloat(product.price?.cost) * 0.95 || 8,
-      alibaba: parseFloat(product.suppliers?.alibaba) || parseFloat(product.price?.cost) * 0.85 || 7
-    },
-    profitability: {
-      breakeven: parseInt(product.profitability?.breakeven) || 30 + (index * 3),
-      monthly: parseInt(product.profitability?.monthly) || 1800 - (index * 100),
-      yearly: parseInt(product.profitability?.yearly) || 21600 - (index * 1200)
-    }
-  };
-
-  // Recalculate margins if needed
-  if (validated.price.cost && validated.price.sell) {
-    validated.price.margin = Math.round(((validated.price.sell - validated.price.cost) / validated.price.sell) * 100);
-    validated.price.roi = Math.round(((validated.price.sell - validated.price.cost) / validated.price.cost) * 100);
-  }
-
-  return validated;
-}
-
-function validateASIN(asin) {
-  if (!asin) return null;
-  const asinPattern = /^B0[A-Z0-9]{8}$/;
-  return asinPattern.test(asin) ? asin : null;
-}
-
-function generateASIN() {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let asin = 'B0';
-  for (let i = 0; i < 8; i++) {
-    asin += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return asin;
-}
-
-function validateAliExpressURL(url) {
-  if (!url) return null;
-  
-  // Check if it's a valid AliExpress URL format
-  const aliexpressPattern = /aliexpress\.com\/item\/\d+\.html/;
-  if (aliexpressPattern.test(url)) {
-    return url;
-  }
-  
-  return null;
-}
-
-function generateAliExpressURL(searchTerm) {
-  // Generate search URL instead of fake product URL
-  const encodedTerm = encodeURIComponent(searchTerm);
-  return `https://www.aliexpress.com/w/wholesale-${encodedTerm}.html`;
-}
-
-function generateProfessionalFallback(category, keyword) {
-  const searchTerm = keyword || category;
-  const products = [];
-
-  const productTypes = [
-    'Premium', 'Professional', 'Deluxe', 'Ultimate', 'Pro', 
-    'Advanced', 'Essential', 'Complete'
-  ];
-
-  for (let i = 0; i < 8; i++) {
-    const baseCost = 8 + (i * 1.5);
-    const baseSell = 25 + (i * 3);
-    const margin = Math.round(((baseSell - baseCost) / baseSell) * 100);
-    const roi = Math.round(((baseSell - baseCost) / baseCost) * 100);
-
-    products.push({
-      name: `${productTypes[i]} ${searchTerm}`,
-      category: category,
-      emoji: '📦',
-      desc: `High-quality ${searchTerm.toLowerCase()} with excellent profit margins and strong demand`,
-      asin: generateASIN(),
-      aliexpress: `https://www.aliexpress.com/w/wholesale-${encodeURIComponent(searchTerm)}.html?sortType=total_tranpro_desc&page=${i + 1}`,
-      price: {
-        cost: Math.round(baseCost * 100) / 100,
-        sell: Math.round(baseSell * 100) / 100,
-        margin: margin,
-        roi: roi
-      },
-      bsr: {
-        rank: 5000 + (i * 1500),
-        category: category,
-        monthlySales: 500 - (i * 35)
-      },
-      reviews: {
-        count: 600 + (i * 80),
-        rating: Math.round((4.2 + (i * 0.05)) * 10) / 10
-      },
-      competition: {
-        sellers: 35 + (i * 4),
-        level: i < 3 ? 'Low' : i < 6 ? 'Medium' : 'High'
-      },
-      viral: {
-        score: 75 + (i * 2),
-        platform: 'TikTok',
-        reason: `Trending ${category.toLowerCase()} product with strong social proof`,
-        views: `${2 + (i * 0.4)}M`
-      },
-      trend: {
-        direction: i < 5 ? 'Rising' : 'Stable',
-        velocity: i < 3 ? 'Fast' : 'Medium'
-      },
-      suppliers: {
-        aliexpress: Math.round(baseCost * 0.92 * 100) / 100,
-        alibaba: Math.round(baseCost * 0.82 * 100) / 100
-      },
-      profitability: {
-        breakeven: Math.round((baseCost * 1.8)),
-        monthly: Math.round((baseSell - baseCost) * (500 - i * 35)),
-        yearly: Math.round((baseSell - baseCost) * (500 - i * 35) * 12)
-      }
+    return Response.json({ suggestion: data.choices[0].message.content });
+  } catch {
+    return Response.json({ 
+      suggestion: `Bundle these ${products.length} products together with 15% discount. Target gift buyers and people wanting complete solutions.`
     });
   }
-
-  return JSON.stringify(products);
 }
 
-export async function PUT(request) {
-  try {
-    const { userId, bundleName, products } = await request.json();
-    const db = getSupabase();
-    
-    if (!db) {
-      return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
-    }
-
-    const { data, error } = await db
-      .from('user_bundles')
-      .insert({ user_id: userId, bundle_name: bundleName, products: products })
-      .select()
-      .single();
-
-    if (error) throw error;
-
-    return NextResponse.json({ success: true, bundle: data });
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to save bundle', details: error.message },
-      { status: 500 }
-    );
-  }
-}
-
-export async function GET(request) {
-  try {
-    const userId = request.nextUrl.searchParams.get('userId');
-    
-    if (!userId) {
-      return NextResponse.json({ error: 'userId required' }, { status: 400 });
-    }
-
-    const db = getSupabase();
-    
-    if (!db) {
-      return NextResponse.json({ error: 'Database not configured' }, { status: 503 });
-    }
-
-    const { data: bundles } = await db
-      .from('user_bundles')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    const { data: saved } = await db
-      .from('user_saved')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    return NextResponse.json({
-      success: true,
-      bundles: bundles || [],
-      saved: saved || []
-    });
-  } catch (error) {
-    return NextResponse.json(
-      { error: 'Failed to load user data', details: error.message },
-      { status: 500 }
-    );
-  }
+// ============================================================================
+// FALLBACK GENERATOR
+// ============================================================================
+function generateFallback(count) {
+  const categories = ['Fitness', 'Tech', 'Kitchen', 'Pet', 'Office', 'Outdoor', 'Beauty', 'Gaming'];
+  return Array(count).fill(0).map((_, i) => {
+    const basePrice = 15 + Math.random() * 35;
+    const category = categories[i % categories.length];
+    return {
+      title: `Premium ${category} Bundle - Professional Quality`,
+      asin: `B0${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
+      price: basePrice.toFixed(2),
+      supplier_price: (basePrice * 0.4).toFixed(2),
+      bsr: Math.floor(10000 + Math.random() * 40000).toString(),
+      rating: (4.0 + Math.random()).toFixed(1),
+      reviews: Math.floor(500 + Math.random() * 2000).toString(),
+      image_url: 'https://m.media-amazon.com/images/I/placeholder.jpg',
+      amazon_url: `https://www.amazon.com/dp/B0PLACEHOLDER${i}`,
+      supplier_url: `https://www.aliexpress.com/w/wholesale-${category.toLowerCase()}.html?sortType=total_tranpro_desc`
+    };
+  });
 }
