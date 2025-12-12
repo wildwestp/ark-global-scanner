@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 export default function Home() {
   // ============================================================================
   // STATE MANAGEMENT
+  // ============================================================================
   const [category, setCategory] = useState('');
   const [keyword, setKeyword] = useState('');
   const [products, setProducts] = useState([]);
@@ -817,6 +818,7 @@ export default function Home() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          action: 'search',
           category,
           keyword,
           filters,
@@ -826,7 +828,7 @@ export default function Home() {
 
       const data = await response.json();
       addDebugLog('📦 Response received', data);
-action: 'search',
+
       if (data.error) {
         setError(data.error);
         addDebugLog('❌ Error in response', { error: data.error });
