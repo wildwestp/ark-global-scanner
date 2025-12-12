@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 
+// Force dynamic rendering
+export const dynamic = 'force-dynamic';
+
 export default function Home() {
   // ============================================================================
   // PASSWORD & AUTH
