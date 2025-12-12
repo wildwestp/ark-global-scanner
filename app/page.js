@@ -1178,6 +1178,31 @@ export default function Home() {
     );
   }
 
+  // Load saved data when authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      // Load saved products
+      fetch('/api/search?action=saved')
+        .then(res => res.json())
+        .then(data => setSavedProducts(data.products || []))
+        .catch(() => {});
+      
+      // Load competitors
+      fetch('/api/search?action=competitors')
+        .then(res => res.json())
+        .then(data => setCompetitors(data.competitors || []))
+        .catch(() => {});
+        
+      // Load bundles from localStorage
+      const saved = localStorage.getItem('ark_bundles');
+      if (saved) {
+        try {
+          setBundles(JSON.parse(saved));
+        } catch (e) {}
+      }
+    }
+  }, [isAuthenticated]);
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -1218,9 +1243,9 @@ export default function Home() {
           <div className="flex gap-2">
             {[
               { id: 'search', icon: '🔍', label: 'Search' },
-              { id: 'saved', icon: '💾', label: `Saved (${savedProducts.length})` },
-              { id: 'bundles', icon: '📦', label: `Bundles (${bundles.length})` },
-              { id: 'competitors', icon: '👁️', label: `Watch (${competitors.length})` }
+              { id: 'saved', icon: '💾', label: `Saved (${savedProducts?.length || 0})` },
+              { id: 'bundles', icon: '📦', label: `Bundles (${bundles?.length || 0})` },
+              { id: 'competitors', icon: '👁️', label: `Watch (${competitors?.length || 0})` }
             ].map(tab => (
               <button
                 key={tab.id}
