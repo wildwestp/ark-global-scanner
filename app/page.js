@@ -1027,10 +1027,21 @@ JSON only: [{"name":"Product Name","category":"${cat.name}","emoji":"📦","desc
                           </div>
 
                           {/* Suppliers */}
-                          {(p.suppliers?.alibaba || p.suppliers?.cj) && (
+                          {(p.suppliers?.aliexpress || p.suppliers?.alibaba || p.suppliers?.cj) && (
                             <div className="bg-orange-50 rounded-xl p-3">
                               <h4 className="font-bold text-orange-700 mb-2 text-sm">🏭 Suppliers</h4>
                               <div className="grid grid-cols-2 gap-2 text-xs">
+                                {p.suppliers?.aliexpress && (
+                                  <div>
+                                    <span className="text-slate-600">AliExpress:</span>
+                                    <span className="font-bold text-orange-600 ml-1">${p.suppliers.aliexpress}</span>
+                                    {p.aliexpress && (
+                                      <a href={p.aliexpress} target="_blank" rel="noopener noreferrer" className="ml-1 text-blue-500 hover:underline text-xs">
+                                        🔗
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
                                 {p.suppliers?.alibaba && (
                                   <div>
                                     <span className="text-slate-600">Alibaba:</span>
@@ -1417,6 +1428,19 @@ JSON only: [{"name":"Product Name","category":"${cat.name}","emoji":"📦","desc
                               <div className="bg-amber-50 rounded-xl p-4">
                                 <h4 className="font-bold text-slate-700 mb-3 text-sm">📦 Supplier Prices</h4>
                                 <div className="space-y-2 text-xs">
+                                  {p.suppliers.aliexpress && (
+                                    <div className="flex justify-between items-center">
+                                      <span className="text-slate-600">AliExpress:</span> 
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-bold">${p.suppliers.aliexpress}</span>
+                                        {p.aliexpress && (
+                                          <a href={p.aliexpress} target="_blank" rel="noopener noreferrer" className="bg-orange-500 hover:bg-orange-600 text-white px-2 py-1 rounded text-xs">
+                                            View →
+                                          </a>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
                                   <div className="flex justify-between"><span className="text-slate-600">Alibaba:</span> <span className="font-bold">${p.suppliers.alibaba || 'N/A'}</span></div>
                                   <div className="flex justify-between"><span className="text-slate-600">CJ Dropshipping:</span> <span className="font-bold">${p.suppliers.cj || 'N/A'}</span></div>
                                 </div>
