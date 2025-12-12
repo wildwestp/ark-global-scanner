@@ -4,6 +4,40 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 
 export default function Home() {
   // ============================================================================
+  // PASSWORD & AUTH
+  // ============================================================================
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  
+  useEffect(() => {
+    if (typeof window !== 'undefined' && localStorage.getItem('ark_auth') === 'true') {
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (passwordInput === 'arkglobal2024') {
+      localStorage.setItem('ark_auth', 'true');
+      setIsAuthenticated(true);
+    } else {
+      alert('Wrong password!');
+      setPasswordInput('');
+    }
+  };
+
+  // ============================================================================
+  // TABS & TOAST
+  // ============================================================================
+  const [activeTab, setActiveTab] = useState('search');
+  const [toast, setToast] = useState(null);
+  
+  const showToast = (msg) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  // ============================================================================
   // STATE MANAGEMENT
   // ============================================================================
   const [category, setCategory] = useState('');
@@ -1109,21 +1143,105 @@ export default function Home() {
   }, [products, filters, calculateProfit]);
 
   // ============================================================================
+  // PASSWORD SCREEN
+  // ============================================================================
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <form onSubmit={handleLogin} className="bg-gray-900 p-8 rounded-xl border border-gray-800 max-w-md w-full shadow-2xl">
+          <div className="text-center mb-8">
+            <div className="inline-block bg-gradient-to-br from-orange-500 to-orange-600 p-4 rounded-lg mb-4 shadow-xl">
+              <span className="text-3xl font-bold text-white">ARK</span>
+            </div>
+            <h1 className="text-3xl font-bold text-white mb-2">Bundle Scanner</h1>
+            <p className="text-orange-400 font-semibold">V6.0 ULTIMATE</p>
+            <p className="text-gray-400 text-xs mt-2">50+ Categories • Real-time Tracking • $0.50/mo</p>
+          </div>
+          
+          <input
+            type="password"
+            value={passwordInput}
+            onChange={(e) => setPasswordInput(e.target.value)}
+            className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-lg focus:ring-2 focus:ring-orange-500 text-white mb-4"
+            placeholder="Enter password"
+            autoFocus
+          />
+          
+          <button
+            type="submit"
+            className="w-full py-3 bg-gradient-to-r from-orange-600 to-orange-500 hover:from-orange-500 hover:to-orange-600 rounded-lg font-bold text-white transition shadow-lg hover:shadow-xl"
+          >
+            🚀 Access Scanner
+          </button>
+        </form>
+      </div>
+    );
+  }
+
+  // ============================================================================
   // RENDER
   // ============================================================================
   return (
     <div className="min-h-screen bg-black text-white">
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-4 right-4 bg-green-600 text-white px-6 py-3 rounded-lg shadow-xl z-50">
+          ✅ {toast}
+        </div>
+      )}
+
       {/* Header */}
       <header className="border-b border-gray-800 bg-gradient-to-r from-orange-600 to-orange-500">
         <div className="container mx-auto px-4 py-6">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
               <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-3 rounded-lg shadow-lg">
                 <span className="text-2xl font-bold text-white">ARK</span>
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-white">Bundle Scanner V6.0</h1>
-                <p className="text-orange-100 text-sm">The Beast - 50+ Categories • Advanced Filters • Real-time Tracking</p>
+                <h1 className="text-3xl font-bold text-white">Bundle Scanner V6 Ultimate</h1>
+                <p className="text-orange-100 text-sm">50+ Categories • Advanced Filters • Real-time Tracking</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                localStorage.removeItem('ark_auth');
+                setIsAuthenticated(false);
+              }}
+              className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-semibold transition"
+            >
+              🚪 Logout
+            </button>
+          </div>
+          
+          {/* Tabs */}
+          <div className="flex gap-2">
+            {[
+              { id: 'search', icon: '🔍', label: 'Search' },
+              { id: 'saved', icon: '💾', label: `Saved (${savedProducts.length})` },
+              { id: 'bundles', icon: '📦', label: `Bundles (${bundles.length})` },
+              { id: 'competitors', icon: '👁️', label: `Watch (${competitors.length})` }
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-6 py-2 rounded-lg font-semibold transition ${
+                  activeTab === tab.id
+                    ? 'bg-white text-orange-600'
+                    : 'bg-orange-700 text-white hover:bg-orange-600'
+                }`}
+              >
+                {tab.icon} {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <div className="container mx-auto px-4 py-8">
+        {/* SEARCH TAB */}
+        {activeTab === 'search' && (
+          <div>
               </div>
             </div>
             <div className="flex gap-2">
@@ -1719,3 +1837,92 @@ export default function Home() {
     </div>
   );
 }
+
+        {/* SAVED TAB */}
+        {activeTab === 'saved' && (
+          <div>
+            <h2 className="text-2xl font-bold mb-6">💾 Saved Products ({savedProducts.length})</h2>
+            {savedProducts.length === 0 ? (
+              <div className="text-center py-12 bg-gray-900 rounded-xl">
+                <p className="text-gray-400">No saved products yet. Start searching!</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {savedProducts.map((product, i) => (
+                  <div key={i} className="bg-gray-900 rounded-xl p-4 border border-gray-800">
+                    <h3 className="font-semibold mb-2">{product.title}</h3>
+                    <div className="text-sm space-y-1 mb-3">
+                      <div className="text-green-400">${product.price}</div>
+                      <div className="text-blue-400">Supplier: ${product.supplier_price}</div>
+                    </div>
+                    <button 
+                      onClick={() => {
+                        setSavedProducts(prev => prev.filter((_, idx) => idx !== i));
+                        showToast('Removed!');
+                      }}
+                      className="px-3 py-1 bg-red-600 rounded text-xs"
+                    >
+                      🗑️ Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BUNDLES TAB */}
+        {activeTab === 'bundles' && (
+          <div>
+            <h2 className="text-2xl font-bold mb-6">📦 Bundles ({bundles.length})</h2>
+            <button 
+              onClick={() => {
+                const name = prompt('Bundle name?');
+                if (name) {
+                  const newBundle = { name, products: [], created: Date.now() };
+                  const updated = [...bundles, newBundle];
+                  setBundles(updated);
+                  localStorage.setItem('ark_bundles', JSON.stringify(updated));
+                  showToast('Created!');
+                }
+              }}
+              className="mb-4 px-6 py-3 bg-orange-600 rounded-lg font-semibold"
+            >
+              ➕ Create Bundle
+            </button>
+            <div className="space-y-4">
+              {bundles.map((bundle, i) => (
+                <div key={i} className="bg-gray-900 rounded-xl p-6 border border-gray-800">
+                  <h3 className="text-xl font-bold">{bundle.name}</h3>
+                  <p className="text-gray-400">Products: {bundle.products?.length || 0}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* COMPETITORS TAB */}
+        {activeTab === 'competitors' && (
+          <div>
+            <h2 className="text-2xl font-bold mb-6">👁️ Watching ({competitors.length})</h2>
+            <div className="space-y-4">
+              {competitors.map((comp, i) => (
+                <div key={i} className="bg-gray-900 rounded-xl p-4 flex justify-between">
+                  <div>
+                    <p className="font-semibold">ASIN: {comp.asin}</p>
+                    <p className="text-sm text-gray-400">Added: {new Date(comp.added_at).toLocaleDateString()}</p>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      setCompetitors(prev => prev.filter((_, idx) => idx !== i));
+                      showToast('Removed!');
+                    }}
+                    className="px-4 py-2 bg-red-600 rounded"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
